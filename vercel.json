@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/tg_id=:id",
+      "destination": "/?tg_id=:id"
+    }
+  ]
+}
