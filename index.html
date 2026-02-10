@@ -195,6 +195,126 @@
         const BOT_LINK = 'https://t.me/unguriananastasiabot?start=landing_future2'; 
         // ---------------------
 
+        // ===== КОНФІГУРАЦІЯ SENDPULSE =====
+        const SENDPULSE_CLIENT_ID = '94842249128a635f8edb0b64f229b7a9';
+        const SENDPULSE_CLIENT_SECRET = 'd9f691d7eae2312098c0a3eae5ac6740';
+        const BOT_ID = '69864e51de35990d2400ea9b';
+
+        // ===== ОТРИМУЄМО TELEGRAM ID З URL =====
+        let telegramChatId = null;
+
+        // Спробуємо отримати з параметра ?tg_id=
+        const urlParamsTg = new URLSearchParams(window.location.search);
+        telegramChatId = urlParamsTg.get('tg_id');
+
+        // Якщо немає — шукаємо в шляху /tg_id=123
+        if (!telegramChatId) {
+            const path = window.location.pathname;
+            const match = path.match(/tg_id=(\d+)/);
+            if (match) {
+                telegramChatId = match[1];
+            }
+        }
+
+        // Зберігаємо в localStorage
+        if (telegramChatId) {
+            localStorage.setItem('tg_chat_id', telegramChatId);
+            console.log('Telegram ID збережено:', telegramChatId);
+        }
+
+        // ===== ФУНКЦІЯ ОТРИМАННЯ ТОКЕНА SENDPULSE =====
+        async function getSendPulseToken() {
+            try {
+                const response = await fetch('https://api.sendpulse.com/oauth/access_token', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        grant_type: 'client_credentials',
+                        client_id: SENDPULSE_CLIENT_ID,
+                        client_secret: SENDPULSE_CLIENT_SECRET
+                    })
+                });
+                const data = await response.json();
+                return data.access_token;
+            } catch (e) {
+                console.error("SendPulse Token Error:", e);
+                return null;
+            }
+        }
+
+        // ===== ФУНКЦІЯ ОТРИМАННЯ CONTACT_ID ПО TELEGRAM_ID =====
+        async function getContactId(token, tgId) {
+            try {
+                // Отримуємо всіх контактів бота
+                const response = await fetch(`https://api.sendpulse.com/telegram/contacts?bot_id=${BOT_ID}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                
+                const data = await response.json();
+                
+                // Шукаємо контакт з потрібним telegram_id
+                if (data.data) {
+                    const contact = data.data.find(c => String(c.telegram_id) === String(tgId));
+                    if (contact) {
+                        return contact.id;
+                    }
+                }
+            } catch (e) {
+                console.error("SendPulse Contact Error:", e);
+            }
+            return null;
+        }
+
+        // ===== ФУНКЦІЯ ВІДМІТКИ АНКЕТИ В SENDPULSE =====
+        async function markAnketaFilled() {
+            const chatId = localStorage.getItem('tg_chat_id');
+            if (!chatId) {
+                console.log('SendPulse: Telegram ID не знайдено');
+                return false;
+            }
+            
+            try {
+                const token = await getSendPulseToken();
+                if (!token) {
+                    console.log('SendPulse: Не вдалося отримати токен');
+                    return false;
+                }
+                
+                const contactId = await getContactId(token, chatId);
+                if (!contactId) {
+                    console.log('SendPulse: Контакт не знайдено');
+                    return false;
+                }
+                
+                console.log('SendPulse: Знайдено contact_id:', contactId);
+                
+                const response = await fetch('https://api.sendpulse.com/telegram/contacts/setVariable', {
+                    method: 'POST',
+                    headers: {
+                        'Authorization': 'Bearer ' + token,
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        bot_id: BOT_ID,
+                        contact_id: contactId,
+                        variable_name: 'anketa_filled',
+                        variable_value: 'yes'
+                    })
+                });
+                
+                const result = await response.json();
+                console.log('SendPulse відповідь:', result);
+                return true;
+            } catch (error) {
+                console.error('Помилка SendPulse:', error);
+                return false;
+            }
+        }
+
         lucide.createIcons();
 
         // Phone Input Setup
@@ -228,7 +348,7 @@
         document.querySelector('a[href="YOUR_BOT_LINK"]').href = BOT_LINK;
 
         // Form Submit Logic
-        document.getElementById('applicationForm').addEventListener('submit', function(e) {
+        document.getElementById('applicationForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             errorMsg.classList.add('hidden');
 
@@ -251,6 +371,13 @@
                 date: new Date().toLocaleString("uk-UA"),
                 ...getUTMParams()
             };
+
+            // ===== ВІДПРАВКА В SENDPULSE =====
+            try {
+                await markAnketaFilled();
+            } catch (e) {
+                console.log("SendPulse skipped");
+            }
 
             fetch(GOOGLE_SCRIPT_URL, {
                 method: 'POST',
